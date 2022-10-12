@@ -1,4 +1,4 @@
-- 👋 Hi, I’m yangdanbo
+- 👋 Hi, I’m Dumbbell Yang
 - 👀 I’m interested in NLP
 - 🌱 I’m currently learning python
 - 📫 you can reach me by email:yangdanbo@163.com
