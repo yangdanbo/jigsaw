@@ -1,0 +1,1632 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+  <head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+  <meta name="generator" content="PSPad editor, www.pspad.com">
+  <title>Jigsaw Resolve</title>
+  </head>
+  <script language="javascript">
+    Date.prototype.format = function(fmt) { //author: meizz 
+      var o = { 
+        "M+" : this.getMonth()+1,                 //月份 
+        "d+" : this.getDate(),                    //日 
+        "h+" : this.getHours(),                   //小时 
+        "m+" : this.getMinutes(),                 //分 
+        "s+" : this.getSeconds(),                 //秒 
+        "q+" : Math.floor((this.getMonth()+3)/3), //季度 
+        "S"  : this.getMilliseconds()             //毫秒 
+      }; 
+      if(/(y+)/.test(fmt)) 
+        fmt=fmt.replace(RegExp.$1, 
+          (this.getFullYear()+"").substr(4 - RegExp.$1.length)); 
+      for(var k in o) 
+        if(new RegExp("("+ k +")").test(fmt)) 
+          fmt = fmt.replace(RegExp.$1, 
+          (RegExp.$1.length==1) ? (o[k]) : 
+          (("00"+ o[k]).substr((""+ o[k]).length))); 
+      return fmt; 
+    }
+
+    function JigsawGame(){
+        if(isNaN(arguments[0]))  {
+            this.Rows = this.Cols = 3; 
+            this.processLevel = this.Rows;
+        }
+        else {
+            this.Rows = this.Cols = parseInt(arguments[0]);
+            this.processLevel = this.Rows;
+        }  
+      
+        //初始化
+        this.initProperty = function(){
+            this.originPicIndex = new Array(this.Rows * this.Cols); 
+            this.picIndex = new Array(this.Rows * this.Cols);
+            this.autoSteps = [];
+            this.resolveSteps = [];
+            this.hasResolve = false;
+            this.lastMoveDirect = "";
+            
+            this.isLog = false;
+            this.logContent = "";
+            this.fixedBlocks = [];  //已經按順序移動好的塊，除了左上角和右下角大回轉外，不許移動
+            this.isTest = false;
+            this.isResolving = false;   
+        }
+        
+        //初始化最后四块时的解法
+        this.initResolve = function(){
+            //最后四個Block的Index，三階為5，6，8，9（base 1）
+            this.lastIdx1 = this.Rows * this.Cols - this.Cols - 1; //5
+            this.lastIdx2 = this.Rows * this.Cols - this.Cols;     //6
+            this.lastIdx3 = this.Rows * this.Cols - 1;             //8
+            this.lastIdx4 = this.Rows * this.Cols;                 //9
+                
+            //二階有解的十二種情況 ,block index(base 1)  三階為5，6，8，9
+            this.fourResolvedBlocks = new Array(
+                new Array(this.lastIdx1, this.lastIdx2, this.lastIdx3, this.lastIdx4),
+                new Array(this.lastIdx1, this.lastIdx2, this.lastIdx4, this.lastIdx3),
+                new Array(this.lastIdx2, this.lastIdx3, this.lastIdx1, this.lastIdx4),
+                new Array(this.lastIdx3, this.lastIdx1, this.lastIdx2, this.lastIdx4),
+                new Array(this.lastIdx2, this.lastIdx3, this.lastIdx4, this.lastIdx1),
+                new Array(this.lastIdx3, this.lastIdx1, this.lastIdx4, this.lastIdx2),
+                new Array(this.lastIdx4, this.lastIdx2, this.lastIdx1, this.lastIdx3),
+                new Array(this.lastIdx4, this.lastIdx3, this.lastIdx2, this.lastIdx1),
+                new Array(this.lastIdx4, this.lastIdx1, this.lastIdx3, this.lastIdx2),
+                new Array(this.lastIdx2, this.lastIdx4, this.lastIdx1, this.lastIdx3),
+                new Array(this.lastIdx3, this.lastIdx4, this.lastIdx2, this.lastIdx1),
+                new Array(this.lastIdx1, this.lastIdx4, this.lastIdx3, this.lastIdx2)
+            );
+        
+            //二階有解的解法
+            this.fourResolvedSteps = new Array(
+                new Array(),
+                new Array(this.lastIdx3 + ""),
+                new Array(this.lastIdx3, this.lastIdx2, this.lastIdx1, this.lastIdx3),
+                new Array(this.lastIdx2, this.lastIdx3, this.lastIdx1, this.lastIdx2),
+                new Array(this.lastIdx1, this.lastIdx3, this.lastIdx2, this.lastIdx1, this.lastIdx3),
+                new Array(this.lastIdx3, this.lastIdx1, this.lastIdx2),
+                new Array(this.lastIdx1, this.lastIdx3),
+                new Array(this.lastIdx2, this.lastIdx1, this.lastIdx3, this.lastIdx2, this.lastIdx1, this.lastIdx3),
+                new Array(this.lastIdx1, this.lastIdx2),
+                new Array(this.lastIdx3, this.lastIdx2, this.lastIdx1, this.lastIdx3),
+                new Array(this.lastIdx1, this.lastIdx2, this.lastIdx3, this.lastIdx1, this.lastIdx2),
+                new Array(this.lastIdx2 + "")
+            );
+        }
+                 
+        //get current htm folder
+        this.getCurrentFolder = function(){
+            var strRef = self.location.href;
+            strRef = strRef.replace("file:///","");
+            while(strRef.indexOf("/") != -1){
+                strRef = strRef.replace("/","\\");
+            }
+    
+            while(strRef.indexOf("%20") != -1){
+                strRef = strRef.replace("%20"," ");
+            }
+    
+            return strRef.substring(0,strRef.lastIndexOf("\\") + 1);
+        }
+
+        this.writeFile = function(strFolder,strFileName,strFileContent){
+            var fso, tf;
+            fso = new ActiveXObject("Scripting.FileSystemObject");
+
+            var arrFolder = strFolder.split("\\");
+            var startFolder = arrFolder[0];
+            if (arrFolder.length > 1){
+                for (var i = 1;i < arrFolder.length;i ++){
+                    if (arrFolder[i] != ""){
+                        startFolder += "\\" + arrFolder[i];
+                        if (fso.FolderExists(startFolder) == false){
+                            fso.CreateFolder(startFolder);
+                        }
+                    }
+                }
+            }
+    
+            tf = fso.CreateTextFile(strFolder + strFileName, true, true); 
+    
+            var arrFileContent = strFileContent.split("\n");
+    
+            for(var i = 0;i < arrFileContent.length;i ++){
+                tf.WriteLine(arrFileContent[i]);
+                 if (i % this.Rows == 0){
+                    tf.WriteLine("");
+                }
+            }
+
+            tf.Close();
+    
+            alert(strFolder + strFileName + " saved!");
+        }
+        
+        this.isBlankCanMoveLeft = function (curBlank){
+            if ((curBlank % this.Cols) >= 1){
+                return true;
+            }
+            else{
+                return false;
+            }
+        }
+
+        this.isBlankCanMoveRight = function(curBlank){
+            if ((curBlank % this.Cols) < (this.Cols - 1)){
+                return true;
+            }
+            else{
+                return false;
+            }
+        }
+
+        this.isBlankCanMoveUp = function(curBlank){
+            if (parseInt(curBlank / this.Cols) >= 1){
+                return true;
+            } 
+            else{
+                return false;
+            }
+        }
+
+        this.isBlankCanMoveDown = function(curBlank){
+            if (parseInt(curBlank / this.Cols) < (this.Rows - 1)){
+                return true;
+            } 
+            else{
+                return false;
+            }
+        }  
+
+        //基于1的位置下標
+        this.getLocation = function(curValue){
+            for (var i = 0;i < this.picIndex.length;i ++){
+                if (this.picIndex[i] == curValue){
+                    return i + 1;
+                }
+            }
+            
+            return -1;
+        }
+        
+        this.getBlankLocation = function(){
+            return this.getLocation(this.Rows * this.Cols);
+        }
+        
+        this.getRandomNextIndex = function(curIndex){
+            var moveIndex = parseInt(Math.random()* 1000) % 4;
+            var newIndex = curIndex;
+            switch(moveIndex){
+                case 0:
+                  if ((this.isBlankCanMoveRight(curIndex)) && 
+                      (this.lastMoveDirect != "left")){
+                      this.lastMoveDirect = "right";
+                      newIndex = parseInt(curIndex) + 1;
+                  }
+                  break;
+                case 1:
+                  if ((this.isBlankCanMoveDown(curIndex)) && 
+                      (this.lastMoveDirect != "up")){
+                      this.lastMoveDirect = "down";
+                      newIndex = parseInt(curIndex) + parseInt(this.Cols);
+                  }
+                  break;
+                case 2:
+                  if ((this.isBlankCanMoveLeft(curIndex)) && 
+                      (this.lastMoveDirect != "right")){
+                      this.lastMoveDirect = "left";
+                      newIndex = curIndex - 1;
+                  }
+                  break;
+                case 3:
+                  if((this.isBlankCanMoveUp(curIndex)) && 
+                     (this.lastMoveDirect != "down")){
+                      this.lastMoveDirect = "up";
+                      newIndex = curIndex - this.Cols; 
+                  }
+                  break;
+                default:
+                  newIndex = curIndex;
+                  break;
+            }
+            
+            return newIndex;
+        }
+
+        this.saveOriginPicIndex = function(){
+        //保存原来的图块索引
+            for(var i = 0;i < this.picIndex.length;i ++){
+                this.originPicIndex[i] = this.picIndex[i];
+            }
+        }
+        
+        //和空块交换打乱图块，一定有解
+        this.initRuffle = function (initRuffleLevel){
+            for (var i = 0;i < this.picIndex.length;i ++){
+                this.picIndex[i] = i + 1;
+            }
+            
+            for(var i = 0; i < initRuffleLevel; i++){
+                var firstIndex = this.getBlankLocation();
+                var secondIndex = this.getRandomNextIndex(firstIndex);
+        
+                if ((firstIndex != secondIndex) && 
+                    (secondIndex < this.picIndex.length)){
+              
+                    var intTemp = this.picIndex[firstIndex];
+                    this.picIndex[firstIndex] = this.picIndex[secondIndex];
+                    this.picIndex[secondIndex] = intTemp;
+              
+                    this.autoSteps[this.autoSteps.length] = firstIndex; 
+                }
+            }
+            
+            if (this.isLog){
+                this.logContent += this.getString();
+            }
+            
+            //保存原来的图块索引
+            this.saveOriginPicIndex();
+        }     
+        
+        //隨機打亂圖塊,可能无解
+        this.randomInit = function (){
+            this.isTest = false;
+            
+            for (var i = 0;i < this.picIndex.length;i ++){
+                this.picIndex[i] = -1;
+            }
+           
+            for (var i = 0; i < this.picIndex.length;i ++){
+                var curLoc = parseInt(Math.random()* 1000) % (this.Rows * this.Rows);
+                while (this.picIndex[curLoc] != -1){
+                   curLoc ++;
+                   if (curLoc == this.Rows * this.Rows){
+                      curLoc = 0;
+                   }
+                }
+                this.picIndex[curLoc] = i + 1;
+            }
+            
+            this.writeFile(this.getCurrentFolder(),
+                  "testing_" + (new Date()).format("yyyyMMddhhmmssS") + ".dat",
+                  this.getString());
+                  
+            //保存原来的图块索引
+            this.saveOriginPicIndex();
+        } 
+       
+        //測試數據
+        this.testInit = function (){
+            this.isTest = true;
+            
+            this.picIndex[0] = 2;this.picIndex[1] = 3;this.picIndex[2] = 8;
+            this.picIndex[3] = 9;this.picIndex[4] = 5;this.picIndex[5] = 6;
+            this.picIndex[6] = 4;this.picIndex[7] = 7;this.picIndex[8] = 1;
+            
+            //this.picIndex[0] = 5; this.picIndex[1] = 3;this.picIndex[2] = 2;
+            //this.picIndex[3] = 7; this.picIndex[4] = 9;this.picIndex[5] = 4;
+            //this.picIndex[6] = 6; this.picIndex[7] = 1;this.picIndex[8] = 8;
+           
+            //this.picIndex[0] = 9; this.picIndex[1] = 10;this.picIndex[2] = 12; this.picIndex[3] = 7;
+            //this.picIndex[4] = 3; this.picIndex[5] = 4; this.picIndex[6] = 11; this.picIndex[7] = 13;
+            //this.picIndex[8] = 2; this.picIndex[9] = 14;this.picIndex[10] = 15;this.picIndex[11] = 16;
+            //this.picIndex[12] = 1;this.picIndex[13] = 5;this.picIndex[14] = 6; this.picIndex[15] = 8;
+            
+            //this.picIndex[0] = 13; this.picIndex[1] = 8; this.picIndex[2] = 14;this.picIndex[3] = 1;
+            //this.picIndex[4] = 15; this.picIndex[5] = 7; this.picIndex[6] = 4; this.picIndex[7] = 16;
+            //this.picIndex[8] = 5;  this.picIndex[9] = 9; this.picIndex[10] = 6;this.picIndex[11] = 10;
+            //this.picIndex[12] = 11;this.picIndex[13] = 2;this.picIndex[14] = 3;this.picIndex[15] = 12;
+            
+            //this.picIndex[0] = 15; this.picIndex[1] = 5;  this.picIndex[2] = 9;  this.picIndex[3] = 11;	this.picIndex[4] = 17;	
+            //this.picIndex[5] = 4;	 this.picIndex[6] = 20;	this.picIndex[7] = 1;  this.picIndex[8] = 14;	this.picIndex[9] = 12;	
+            //this.picIndex[10] =22; this.picIndex[11] = 18;this.picIndex[12] = 7; this.picIndex[13] = 8;	this.picIndex[14] = 3;	
+            //this.picIndex[15] =16; this.picIndex[16] = 21;this.picIndex[17] = 23;this.picIndex[18] = 24;this.picIndex[19] = 25;	
+            //this.picIndex[20] =19; this.picIndex[21] = 6;	this.picIndex[22] = 2; this.picIndex[23] = 10;this.picIndex[24] = 13;	
+        
+            //保存原来的图块索引
+            this.saveOriginPicIndex();
+        } 
+        
+        //测试特定布局
+        this.testSpec = function (arrIndex){
+            this.Rows = this.Cols = Math.sqrt(arrIndex.length);
+            this.processLevel = this.Rows;
+            
+            this.initProperty();
+            this.initResolve();
+          
+            this.isTest = true;
+            
+            this.picIndex = arrIndex;
+            //保存原来的图块索引
+            this.saveOriginPicIndex();
+        }
+            
+        //從基于1的Location取得基于0的列索引
+        this.getCol = function(curLoc){
+            return (curLoc - 1) % this.Cols;
+        }
+        
+        //從基于1的Location取得基于0的行索引
+        this.getRow = function(curLoc){
+            return parseInt((curLoc - 1) / this.Cols);
+        }
+         
+        //檢查是否成功完成拼圖，所有圖塊號和索引相等
+        this.check = function(){
+            for (var i = 0;i < this.picIndex.length;i ++){
+                if (this.picIndex[i] != (i + 1)){
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        //交換兩個圖塊
+        this.swap = function(from,to){
+            if (this.isTest){
+                //alert("Swap from:" + this.picIndex[from] + "(" + from + ") to " + this.picIndex[to] + "(" + to + ")");
+            }
+            
+            if (this.isResolving){
+                if (this.picIndex[from] == this.Rows * this.Cols){
+                    this.resolveSteps.push(this.picIndex[to]);
+                }
+                else{
+                    this.resolveSteps.push(this.picIndex[from]);
+                }
+            }
+            
+            var temp = this.picIndex[from];
+            this.picIndex[from] = this.picIndex[to];
+            this.picIndex[to] = temp;
+        }
+        
+        this.isCanMoveTo = function(idx){
+            if(idx < 0 || idx > this.Cols * this.Rows - 1){
+                return false;
+            }
+            
+            for (var i = 0;i < this.fixedBlocks.length;i ++){
+                if (this.fixedBlocks[i] == idx){
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        //將空塊和目標塊移動到相鄰位置
+        this.moveBlankTargetAdjacent = function(blankRow,blankCol,curRow,curCol){
+           //移動空塊和目標塊到相鄰行列
+            //下移到相鄰行
+            while(blankRow < curRow - 1){
+                this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                blankRow ++;
+            }
+            
+            while(blankRow > curRow + 1){
+                if (this.isCanMoveTo((blankRow - 1) * this.Cols + blankCol)){
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                    blankRow --;
+                }
+                else{
+                    if (blankCol == this.Cols - 1){
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                    }
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                    }
+                }
+            }
+            
+            //右移到相鄰列  
+            while (blankCol < curCol - 1){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+            }
+            
+            while (blankCol > curCol + 1){
+                if (this.isCanMoveTo(blankRow * this.Cols + blankCol - 1)){
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                    blankCol --;
+                }
+                else{
+                    if (blankRow == this.Rows - 1){
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                    }
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                    }
+                }
+            }
+            
+            //如果blankRow為當前Row的上相鄰行且為最上行，下移為下相鄰行
+            if ((blankRow == (this.Rows - this.processLevel)) && 
+                (blankRow == curRow - 1)) {
+                if (blankCol != curCol){
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                }
+                else if (blankCol == this.Cols - 1){
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                    blankCol --;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                }
+                else{
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                    blankCol --;
+                }
+            } 
+            /*else{
+                //上移到相鄰行
+                while(blankRow > curRow + 1){
+                    if (this.isCanMoveTo((blankRow - 1) * this.Cols + blankCol)){
+                        this.swap((blankRow - 1) * this.Cols + blankCol, blankRow * this.Cols + blankCol);
+                        blankRow --;
+                    }
+                    else{
+                        while(blankCol < curCol + 1){
+                            this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                            blankCol ++;
+                        }
+                    }
+                }
+            }*/  
+            
+            //如果blankCol為當前Col的左相鄰列且為最左列，右移為右相鄰列
+            if ((blankCol == (this.Cols - this.processLevel)) && 
+                 blankCol == curCol - 1){
+                if (blankRow != curRow){
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                }
+                else if(blankRow == this.Rows - 1){
+                    this.swap((blankRow - 1) * this.Cols + blankCol, blankRow * this.Cols + blankCol);
+                    blankRow --;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                    
+                    this.swap((blankRow + 1) * this.Cols + blankCol, blankRow * this.Cols + blankCol);
+                    blankRow ++;
+                }
+                else{
+                    this.swap((blankRow + 1) * this.Cols + blankCol, blankRow * this.Cols + blankCol);
+                    blankRow ++;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                    
+                    this.swap((blankRow - 1) * this.Cols + blankCol, blankRow * this.Cols + blankCol);
+                    blankRow --;
+                }
+            }
+            /*else{
+                //左移到相鄰列 
+                while (blankCol > curCol + 1){
+                    if (this.isCanMoveTo(blankRow * this.Cols + blankCol - 1)){
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                    }
+                    else{
+                        while(blankRow < curRow + 1){
+                            this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                            blankRow ++;
+                        }
+                    }
+                }
+            }*/ 
+        }
+        
+        //將空塊移動到指定行列索引的塊的上方
+        this.moveBlankToTop = function(curRow,curCol){
+            if (this.isTest){
+                alert("moveBlankToTop:" + (curRow * this.Cols + curCol));
+            }
+            
+            var blankLoc = this.getBlankLocation();
+            var blankRow = this.getRow(blankLoc);
+            var blankCol = this.getCol(blankLoc);
+            
+            //移動至相鄰行列
+            this.moveBlankTargetAdjacent(blankRow,blankCol,curRow,curCol);
+            
+            blankLoc = this.getBlankLocation();
+            blankRow = this.getRow(blankLoc);
+            blankCol = this.getCol(blankLoc);
+            
+            //左移還是右移
+            var isMovedRight = false;
+                    
+            //如果空塊和目標塊同列
+            if(blankCol == curCol){
+                //如果空块已在当前块上方，直接返回
+                if(blankRow == curRow - 1){
+                    return;
+                }
+                
+                //如果空块已在当前块下方，右移，上移，上移，左移，OK
+                if(blankRow == curRow + 1){
+                    //如果不是最右行，右移
+                    if (blankCol < this.Cols - 1){ 
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        isMovedRight = true;
+                    }
+                    //否則，左移
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                        isMovedRight = false;
+                    }
+                    
+                    this.swap((blankRow - 1) * this.Cols + blankCol, blankRow * this.Cols + blankCol);
+                    blankRow --;
+                    
+                    this.swap((blankRow - 1) * this.Cols + blankCol, blankRow * this.Cols + blankCol);
+                    blankRow --;
+                    
+                    //如果右移，現左移
+                    if (isMovedRight){
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                    }
+                    //否則，右移
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                    }
+                } 
+            }
+            
+            //如果空塊和目標塊同行，非最下行，最下行將大回轉處理
+            if(blankRow == curRow){
+                //空塊在左
+                if (blankCol == curCol - 1){
+                     //空塊可以上移 ，上移，右移，OK
+                    if (this.isCanMoveTo((blankRow - 1) * this.Cols + blankCol)){
+                        this.swap((blankRow - 1) * this.Cols + blankCol, 
+                            blankRow * this.Cols + blankCol);
+                        blankRow --;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                    }
+                    //不可以上移，下移一行，右移，右移，再上移，再上移，再左移，繞一圈，OK
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                    }
+                }
+                //空塊在右，上移，左移，OK
+                else {
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                    blankRow --;
+                        
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                    blankCol --;
+                }
+            }
+            
+            //如果空塊在目標塊左上，右移，OK
+            if ((blankCol == curCol - 1) && (blankRow == curRow - 1)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+            }
+            
+            //如果空塊在目標塊右上，左移，OK
+            if ((blankCol == curCol + 1) && (blankRow == curRow - 1)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                blankCol --;
+            }
+            
+            //如果空塊在目標塊左下 ，右移，右移，上移，上移，左移，OK
+            if ((blankCol == curCol - 1) && (blankRow == curRow + 1)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+                
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+                
+                this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                blankRow --;
+                
+                this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                blankRow --;
+                
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                blankCol --;
+            }
+            
+            //如果空塊在目標塊右下，上移，上移，左移，OK
+            if ((blankCol == curCol + 1) && (blankRow == curRow + 1)){
+                this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                blankRow --;
+                
+                this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                blankRow --;
+                
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                blankCol --;
+            }  
+        }
+        
+        //將空塊移動到指定行列索引的塊的下方
+        this.moveBlankToBottom = function(curRow,curCol){
+            if (this.isTest){
+                alert("moveBlankToBottom:" + (curRow * this.Cols + curCol));
+            }
+            
+            var blankLoc = this.getBlankLocation();
+            var blankRow = this.getRow(blankLoc);
+            var blankCol = this.getCol(blankLoc);
+            
+            //移動至相鄰行列
+            this.moveBlankTargetAdjacent(blankRow,blankCol,curRow,curCol);
+            
+            blankLoc = this.getBlankLocation();
+            blankRow = this.getRow(blankLoc);
+            blankCol = this.getCol(blankLoc);
+           
+            //左移還是右移
+            var isMovedRight = false;
+             
+            //當前塊和空塊在同一列 
+            if (blankCol == curCol){
+                //如果空块已在当前块下方，直接返回
+                if(blankRow == curRow + 1){
+                    return;
+                }
+                
+                //如果空塊位于當前塊上方，右移，下移，下移，左移，OK
+                if (blankRow == curRow - 1){
+                
+                    //如果不是最右行，右移
+                    if (blankCol < this.Cols - 1){ 
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        isMovedRight = true;
+                    }
+                    //否則，左移
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                        isMovedRight = false;
+                    }
+                    
+                    this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                    
+                    this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                
+                    //如果右移，左移
+                    if (isMovedRight){
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                    }
+                    //否則，右移
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                    }
+                }
+            }
+            
+            //當前塊和空塊在同一行 
+            if (blankRow == curRow){
+                //空塊在左
+                if (blankCol == curCol - 1){
+                    //如果可以上移，上移，右移OK
+                    if (this.isCanMoveTo((blankRow - 1) * this.Cols + blankCol)){
+                        this.swap(blankRow * this.Cols + blankCol,(blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                    
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                    }
+                    //否則，下移，右移，右移，上移，上移，左移，繞一圈，OK
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                    
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol,(blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                        
+                        this.swap(blankRow * this.Cols + blankCol,(blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                    }
+                }
+                
+                //空塊在右，下移，左移，OK
+                if (blankCol == curCol + 1){
+                    this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                    blankCol --;
+                }
+            }
+            
+            //空塊在目標塊左上，下移，下移，右移，OK
+            if ((blankRow == curRow - 1) && (blankCol == curCol - 1)){
+                this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                blankRow ++;
+                    
+                this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                blankRow ++;
+                    
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+            }
+            
+            //空塊在目標塊右上，下移，下移，左移，OK
+            if ((blankRow == curRow - 1) && (blankCol == curCol + 1)){
+                this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                blankRow ++;
+                    
+                this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                blankRow ++;
+                
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                blankCol --;
+            }
+            
+            //空塊在目標塊左下，右移，OK
+            if ((blankRow == curRow + 1) && (blankCol == curCol - 1)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+            }
+             
+            //空塊在目標塊右下，左移，OK
+            if ((blankRow == curRow + 1) && (blankCol == curCol + 1)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                blankCol --;
+            }
+        }
+        
+        //將空塊移動到指定行列索引的塊的右方
+        this.moveBlankToRight = function(curRow,curCol){
+            if (this.isTest){
+                alert("moveBlankToRight:" + (curRow * this.Cols + curCol));
+            }
+            
+            var blankLoc = this.getBlankLocation();
+            var blankRow = this.getRow(blankLoc);
+            var blankCol = this.getCol(blankLoc);
+            
+            //移動至相鄰行列
+            this.moveBlankTargetAdjacent(blankRow,blankCol,curRow,curCol);
+            
+            blankLoc = this.getBlankLocation();
+            blankRow = this.getRow(blankLoc);
+            blankCol = this.getCol(blankLoc);
+            
+            //alert("blankRow:" + blankRow + " blankCol:" + blankCol + " curRow:" + curRow + " curCol:" + curCol);
+            //當前塊和空塊在同一行 
+            if (blankRow == curRow){
+                //如果空块已在当前块右方，直接返回
+                if(blankCol == curCol + 1){
+                    return;
+                }
+            
+                //如果空塊在目標塊左方
+                if(blankCol == curCol - 1){
+                    //如果能向上方移動，上移，右移，右移，下移，OK
+                    if (this.isCanMoveTo((blankRow - 1) * this.Cols + blankCol)){
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                    
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                    }
+                    //否則，下移，右移，右移，上移，OK
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                    }
+                }
+            }
+                
+            //當前塊和空塊在同一列
+            if (blankCol == curCol){
+                //空塊在上，右移，下移，OK
+                if (blankRow == curRow - 1){
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                    blankRow ++;
+                }
+                
+                //空塊在下，右移，上移，OK
+                if (blankRow == curRow + 1){
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                    blankCol ++;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                    blankRow --;
+                }
+            }
+            
+            //空塊在目標塊左上，右移，右移，下移，OK
+            if ((blankRow == curRow - 1) && (blankCol == curCol - 1)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+                
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+                
+                this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                blankRow ++;    
+            }
+            
+            //空塊在目標塊右上，下移，OK
+            if ((blankRow == curRow - 1) && (blankCol == curCol + 1)){
+                this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                blankRow ++;  
+            }
+            
+            //空塊在目標塊左下，右移，右移，上移，OK
+            if ((blankRow == curRow + 1) && (blankCol == curCol - 1)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+                
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                blankCol ++;
+                
+                this.swap(blankRow * this.Cols + blankCol,(blankRow - 1) * this.Cols + blankCol);
+                blankRow --;
+            }
+            
+            //空塊在目標塊右下 ，上移，OK
+            if ((blankRow == curRow + 1) && (blankCol == curCol + 1)){
+                this.swap(blankRow * this.Cols + blankCol,(blankRow - 1) * this.Cols + blankCol);
+                blankRow --;
+            }
+        }
+        
+        //將空塊移動到指定行列索引的塊的左方
+        this.moveBlankToLeft = function(curRow,curCol){
+            if (this.isTest){
+                alert("moveBlankToLeft:" + (curRow * this.Cols + curCol));
+            }
+            
+            var blankLoc = this.getBlankLocation();
+            var blankRow = this.getRow(blankLoc);
+            var blankCol = this.getCol(blankLoc);
+            
+            //移動至相鄰行列
+            this.moveBlankTargetAdjacent(blankRow,blankCol,curRow,curCol);
+            
+            blankLoc = this.getBlankLocation();
+            blankRow = this.getRow(blankLoc);
+            blankCol = this.getCol(blankLoc);
+            
+            //當前塊和空塊在同一行 
+            if (blankRow == curRow){
+                //如果空块已在当前块左方，直接返回
+                if(blankCol == curCol - 1){
+                    return;
+                }
+                
+                //如果空块已在当前块右方，下移，左移，左移，上移，OK
+                if(blankCol == curCol + 1){
+                    //非最下行，下移
+                    if (blankRow < this.Rows - 1){
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                    
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                    }
+                    //否則，上移
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                    
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                    }
+                }
+            }
+            
+            //當前塊和空塊在同一列
+            if (blankCol == curCol){
+                //如果空块已在当前块上方，
+                if(blankRow == curRow - 1){
+                    //如果空塊可以左移，左移，下移，OK
+                    if (this.isCanMoveTo(blankRow * this.Cols + blankCol - 1)){
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                    }
+                    //否則，右移，下移，下移，左移，左移，上移，繞一圈，OK
+                    else {
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                        blankCol --;
+                        
+                        this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                        blankRow --;
+                    }
+                }
+                
+                //如果空块已在当前块下方，左移，上移，OK
+                if(blankRow == curRow + 1){
+                    this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                    blankCol --;
+                    
+                    this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                    blankRow --;
+                }
+            }
+            
+            //當空塊在目標塊左上，下移，OK
+            if ((blankRow == curRow - 1) && (blankCol == curCol - 1)){
+                this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                blankRow ++;
+            }
+            
+            //當空塊在目標塊右上，左移，左移，下移，OK
+            if ((blankRow == curRow - 1) && (blankCol == curCol + 1)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                blankCol --;
+                
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                blankCol --;
+                
+                this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol);
+                blankRow ++;
+            }
+            
+            //當空塊在目標塊左下 ，上移，OK
+            if ((blankRow == curRow + 1) && (blankCol == curCol - 1)){
+                this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                blankRow --;
+            }
+            
+            //當空塊在目標塊右下，左移，左移，上移，OK
+            if ((blankRow == curRow + 1) && (blankCol == curCol + 1)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                blankCol --;
+                
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1);
+                blankCol --;
+                
+                this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol);
+                blankRow --;
+            }
+        }
+        
+        //大回轉移動右上角目標塊
+        this.moveToRightUp = function(){
+            var blankLoc = this.getBlankLocation();
+            var blankRow = this.getRow(blankLoc);
+            var blankCol = this.getCol(blankLoc);
+                
+            //空块左移到第0列，最左列
+            while(blankCol > (this.Cols - this.processLevel)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1); 
+                blankCol --;
+            }
+                
+            //空块上移到第0行，最上行
+            while(blankRow > (this.Rows - this.processLevel)){
+                this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol); 
+                blankRow --;
+            }
+                
+            //空块右移到最右列
+            while(blankCol < this.Cols - 1){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1); 
+                blankCol ++;
+            }
+                
+            //空块下移 移动目标块到目标位置，向上一行
+            this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol); 
+            blankRow ++;
+                
+            //空块左移
+            this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1); 
+            blankCol --;
+                
+            //空块上移
+            this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol); 
+            blankRow --;
+                
+            //空块左移
+            while(blankCol > (this.Cols - this.processLevel)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1); 
+                blankCol --;
+            }
+                
+            //空块下移
+            this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol); 
+            blankRow ++;
+        }
+        
+        //大回轉移動左下角目標塊
+        this.moveToLeftBottom = function(){
+            var blankLoc = this.getBlankLocation();
+            var blankRow = this.getRow(blankLoc);
+            var blankCol = this.getCol(blankLoc);
+                
+            //空块右移到最右列
+            while(blankCol < this.Cols - 1){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1); 
+                blankCol ++;
+            }
+                
+            //空块上移到第0行 ,最上行
+            while(blankRow > (this.Rows - this.processLevel)){
+                this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol); 
+                blankRow --;
+            }
+                
+            //空块左移到第0列，最左列
+            while(blankCol > (this.Cols - this.processLevel)){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1); 
+                blankCol --;
+            }
+                
+            //空块下移到最下行
+            while(blankRow < this.Rows - 1){
+                this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol); 
+                blankRow ++;
+            }
+                
+            //空块右移 移动目标块到目标位置，向左一列
+            this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1); 
+            blankCol ++;
+                
+            //空块上移
+            this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol); 
+            blankRow --;
+                
+            //空块左移
+            this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol - 1); 
+            blankCol --;
+                
+            //空块上移到第0行，最上行
+            while(blankRow > (this.Rows - this.processLevel)){
+                this.swap(blankRow * this.Cols + blankCol, (blankRow - 1) * this.Cols + blankCol); 
+                blankRow --;
+            }
+                
+            //空块右移到最右列
+            while(blankCol < this.Cols - 1){
+                this.swap(blankRow * this.Cols + blankCol, blankRow * this.Cols + blankCol + 1); 
+                blankCol ++;
+            }
+                
+            //空块下移
+            this.swap(blankRow * this.Cols + blankCol, (blankRow + 1) * this.Cols + blankCol); 
+            blankRow ++; 
+        }
+        
+        //按順序移動指定的塊
+        this.move = function(curBlock){
+            //取得當前位置目標塊的行列
+            var valueLoc = this.getLocation(curBlock);
+            var valueRow = this.getRow(valueLoc);
+            var valueCol = this.getCol(valueLoc);
+           
+            //取得當前位置的行列         
+            var targetRow = this.getRow(curBlock);
+            var targetCol = this.getCol(curBlock);
+            
+            var blankLoc = this.getBlankLocation();
+            var blankRow = this.getRow(blankLoc);
+            var blankCol = this.getCol(blankLoc);
+            
+            var isRightUp = false;
+            var isLeftBottom = false;
+            
+            if (this.isTest){
+                alert("cur " + curBlock + " Value:" + valueLoc + " Row:" + valueRow + " col:" + valueCol + "\n" +
+                      " target row:" + targetRow + " col:" + targetCol + "\n" +
+                      " blank row:" + blankRow + " col:" + blankCol);
+            }
+            
+            //移動目標塊到當前位置
+            //如果目標塊已在當前位置，直接返回
+            if ((targetRow == valueRow) && (targetCol == valueCol)){
+                return;
+            }
+            
+            //目标块最右一列，右上角，无法直接移动，先移动目标块到右上角下一行位置，然后大回转移动目标 块到右上角
+            if ((targetRow == (this.Rows - this.processLevel)) && 
+                (targetCol == this.Cols - 1)){
+                //如果目標位置為空塊，而目標塊在其下方，直接移動目標塊到目標位置
+                if ((blankRow == targetRow) && (blankCol == targetCol)){
+                    if ((valueRow == blankRow + 1) && (valueCol == blankCol)){
+                        this.swap(valueRow * this.Cols + valueCol,(valueRow - 1) * this.Cols + valueCol);
+                        return;
+                    } 
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol,(blankRow + 1) * this.Cols + blankCol);
+                        blankRow ++;
+                        
+                        //重新取得當前位置目標塊的行列
+                        valueLoc = this.getLocation(curBlock);
+                        valueRow = this.getRow(valueLoc);
+                        valueCol = this.getCol(valueLoc);
+                    }             
+                 }
+                 targetRow ++;
+                 
+                 isRightUp = true;
+            }
+            
+            //目标块最下一行，左下角，无法直接移动，先移动目标块到左角右一列位置，然后大回转移动目标 块到左下角
+            if ((targetRow == this.Rows - 1) && 
+                (targetCol == (this.Cols - this.processLevel))) {
+                 //如果目標位置為空塊，而目標塊在其右方，直接移動目標塊到目標位置
+                if ((blankRow == targetRow) && (blankCol == targetCol)){
+                    if ((valueCol == blankCol + 1) && (valueRow == blankRow)){
+                        this.swap(valueRow * this.Cols + valueCol,valueRow * this.Cols + valueCol - 1);
+                        return;
+                    }
+                    else{
+                        this.swap(blankRow * this.Cols + blankCol,blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        this.swap(blankRow * this.Cols + blankCol,blankRow * this.Cols + blankCol + 1);
+                        blankCol ++;
+                        
+                        //重新取得當前位置目標塊的行列
+                        valueLoc = this.getLocation(curBlock);
+                        valueRow = this.getRow(valueLoc);
+                        valueCol = this.getCol(valueLoc);
+                    }
+                }
+                targetCol ++;
+                
+                isLeftBottom = true;
+            }
+            
+            //如果目標塊的和當前位置同行
+            if (targetRow == valueRow){
+                if (targetCol > valueCol){
+                    //如果目標塊的列號大于當前位置列號
+                    while(targetCol > valueCol){
+                        this.moveBlankToRight(valueRow,valueCol);
+                        this.swap(valueRow * this.Cols + valueCol,valueRow * this.Cols + valueCol + 1);
+                        valueCol ++;
+                    }
+                }
+                else{
+                   //如果目標塊的列號小于當前位置列號
+                    while(targetCol < valueCol){
+                        if (this.isCanMoveTo(valueRow * this.Cols + valueCol - 1)){
+                            this.moveBlankToLeft(valueRow,valueCol);
+                            this.swap(valueRow * this.Cols + valueCol,valueRow * this.Cols + valueCol - 1);
+                            valueCol --;
+                        }
+                        else if (targetRow < this.Rows - 1){
+                            this.moveBlankToBottom(valueRow,valueCol);
+                            this.swap(valueRow * this.Cols + valueCol,(valueRow + 1) * this.Cols + valueCol);
+                            valueRow ++;
+                        }
+                        else{
+                            this.moveBlankToTop(valueRow,valueCol);
+                            this.swap(valueRow * this.Cols + valueCol,(valueRow - 1) * this.Cols + valueCol); 
+                            valueRow --;
+                        }
+                    }  
+                }
+            }
+            
+            //如果目標塊的行號小于當前位置行號
+            while(targetRow < valueRow){
+                if (targetCol == valueCol){
+                    if (this.isCanMoveTo((valueRow - 1) * this.Cols + valueCol)){
+                        this.moveBlankToTop(valueRow,valueCol);
+                        this.swap(valueRow * this.Cols + valueCol,(valueRow - 1) * this.Cols + valueCol); 
+                        valueRow --;
+                    }
+                    else if (targetCol < this.Cols - 1){
+                        this.moveBlankToRight(valueRow,valueCol);
+                        this.swap(valueRow * this.Cols + valueCol,valueRow * this.Cols + valueCol + 1);
+                        valueCol ++;
+                    }
+                    else{
+                        this.moveBlankToLeft(valueRow,valueCol);
+                        this.swap(valueRow * this.Cols + valueCol,valueRow * this.Cols + valueCol - 1);
+                        valueCol --;
+                    }
+                }
+                
+                if (targetCol > valueCol){
+                    //如果目標塊的列號大于當前位置列號
+                    while(targetCol > valueCol){
+                        this.moveBlankToRight(valueRow,valueCol);
+                        this.swap(valueRow * this.Cols + valueCol,valueRow * this.Cols + valueCol + 1);
+                        valueCol ++;
+                    }
+                }
+                else{
+                   //如果目標塊的列號小于當前位置列號
+                    while(targetCol < valueCol){
+                        if (this.isCanMoveTo(valueRow * this.Cols + valueCol - 1)){
+                            this.moveBlankToLeft(valueRow,valueCol);
+                            this.swap(valueRow * this.Cols + valueCol,valueRow * this.Cols + valueCol - 1);
+                            valueCol --;
+                        }
+                        else if (targetRow < this.Rows - 1){
+                            this.moveBlankToBottom(valueRow,valueCol);
+                            this.swap(valueRow * this.Cols + valueCol,(valueRow + 1) * this.Cols + valueCol);
+                            valueRow ++;
+                        }
+                        else{
+                            this.moveBlankToTop(valueRow,valueCol);
+                            this.swap(valueRow * this.Cols + valueCol,(valueRow - 1) * this.Cols + valueCol); 
+                            valueRow --;
+                        }
+                    }  
+                }
+            }
+            
+            //如果目標塊的行號大于當前位置行號
+            while(targetRow > valueRow){
+                if (targetCol == valueCol){
+                    this.moveBlankToBottom(valueRow,valueCol);
+                    this.swap(valueRow * this.Cols + valueCol,(valueRow + 1) * this.Cols + valueCol);
+                    valueRow ++;
+                }
+              
+                if (targetCol > valueCol){
+                    //如果目標塊的列號大于當前位置列號
+                    while(targetCol > valueCol){
+                        this.moveBlankToRight(valueRow,valueCol);
+                        this.swap(valueRow * this.Cols + valueCol,valueRow * this.Cols + valueCol + 1);
+                        valueCol ++;
+                    }
+                }
+                else{
+                   //如果目標塊的列號小于當前位置列號
+                    while(targetCol < valueCol){
+                        if (this.isCanMoveTo(valueRow * this.Cols + valueCol - 1)){
+                            this.moveBlankToLeft(valueRow,valueCol);
+                            this.swap(valueRow * this.Cols + valueCol,valueRow * this.Cols + valueCol - 1);
+                            valueCol --;
+                        }
+                        else if (targetRow < this.Rows - 1){
+                            this.moveBlankToBottom(valueRow,valueCol);
+                            this.swap(valueRow * this.Cols + valueCol,(valueRow + 1) * this.Cols + valueCol);
+                            valueRow ++;
+                        }
+                        else{
+                            this.moveBlankToTop(valueRow,valueCol);
+                            this.swap(valueRow * this.Cols + valueCol,(valueRow - 1) * this.Cols + valueCol); 
+                            valueRow --;
+                        }
+                    }  
+                }
+            } 
+            
+            //目标块最右一列，右上角，无法直接移动，先移动目标块到右上角下一行位置，然后大回转移动目标 块到右上角
+            if (isRightUp){
+                this.moveToRightUp();
+            }
+            
+            //目标块最下一行，左下角，无法直接移动，先移动目标块到左角右一列位置，然后大回转移动目标 块到左下角
+            if (isLeftBottom){
+                this.moveToLeftBottom();
+            }   
+        }
+        
+        //判斷是否有解
+        this.checkResolve = function(){
+            if (this.check()){
+                alert("Resolved!"); 
+            }
+            else{
+                alert("No Resolve!");
+            }
+            
+            this.show();
+        }
+        
+         //檢查最后四個block是否有解
+        this.checkLast4Block = function(){
+            for (var i = 0;i < this.fourResolvedBlocks.length;i ++){
+                var curBlocks = this.fourResolvedBlocks[i];
+                
+                if ((curBlocks[0] == this.picIndex[this.lastIdx1 - 1]) &&
+                    (curBlocks[1] == this.picIndex[this.lastIdx2 - 1]) &&
+                    (curBlocks[2] == this.picIndex[this.lastIdx3 - 1]) &&
+                    (curBlocks[3] == this.picIndex[this.lastIdx4 - 1])){
+                     return i;
+                }
+            }   
+            
+            return -1;
+        }
+        
+        //求解
+        this.resolve = function(){
+            this.show();
+            
+            this.isResolving = true;
+            
+            while(this.processLevel >= 3){
+                //移动首行图块
+                var level = this.Rows - this.processLevel;
+                for(var i = 1 + level * (this.Cols + 1); 
+                        i <= (level + 1) * this.Cols;i ++){
+                    this.move(i);
+                    
+                    this.fixedBlocks.push(i-1);
+                  
+                    this.show();
+                }
+                
+                //移动首列图块
+                var j = (this.Cols + 1) * (level + 1);
+                while(j < this.Cols * this.Rows){
+                    this.move(j);
+                    
+                    this.fixedBlocks.push(j-1);
+                    
+                    this.show();
+                    
+                    j += this.Cols;
+                }
+                
+                if (this.processLevel == 3){
+                    //檢查最后四個block
+                    var resolveIdx = this.checkLast4Block(); 
+                    
+                    if ( resolveIdx == -1){
+                        alert("No resolve!");
+                    }
+                    else{
+                        alert("Resolved:" + resolveIdx);
+                        var lastSteps = this.fourResolvedSteps[resolveIdx];
+                        for(var i = 0;i < lastSteps.length;i ++){
+                            this.resolveSteps.push(lastSteps[i]);
+                        }
+                        
+                        this.hasResolve = true;
+                        
+                        this.logContent += this.getResolveSteps();
+                    }
+                    
+                    break;
+                }
+                
+                this.processLevel --;
+            }
+            
+            this.isResolving = false;
+            
+            this.showOrigin();
+            
+            this.showResolveSteps();
+        }
+        
+        this.showAutoSteps = function(){
+            var result = "Auto " + this.autoSteps.length + " Steps:";
+            var count = 0;
+            
+            for (var j = this.autoSteps.length - 1;j >= 0;j --){
+                if (count % 10 == 0){
+                    result += "\n" + this.autoSteps[j] + ",";
+                }
+                else{
+                    if (j == 0){
+                        result += this.autoSteps[j];
+                    }
+                    else{
+                        result += this.autoSteps[j] + ",";
+                    }
+                }
+        
+                count ++;
+            }
+    
+            alert(result);
+        }
+        
+        this.getString = function(){
+            var result = "";
+            for (var i = 0 ;i < this.picIndex.length; i++){
+                if ( i % this.Rows == 0){
+                    result += "\n" + (this.picIndex[i] < 10 ?  
+                    " " + this.picIndex[i] : this.picIndex[i]) + "\t";
+                }
+                else{
+                    result += (this.picIndex[i] < 10 ?  
+                    " " + this.picIndex[i] : this.picIndex[i]) + "\t";
+                }
+            }
+            
+            return result;
+        }
+        
+        this.show = function(){
+            if (this.isLog){
+                this.logContent += this.getString();
+            }
+            alert(this.getString());
+        }
+        
+        this.showOrigin = function(){
+            var result = "";
+            for (var i = 0 ;i < this.originPicIndex.length; i++){
+                if ( i % this.Rows == 0){
+                    result += "\n" + (this.originPicIndex[i] < 10 ?  
+                    " " + this.originPicIndex[i] : this.originPicIndex[i]) + "\t";
+                }
+                else{
+                    result += (this.originPicIndex[i] < 10 ?  
+                    " " + this.originPicIndex[i] : this.originPicIndex[i]) + "\t";
+                }
+            }
+            
+            alert(result);
+        }
+        
+        this.getResolveSteps = function(){
+            var result = "Resolve " + this.resolveSteps.length + " Steps:";
+            
+            for (var i = 0 ;i < this.resolveSteps.length ; i ++){
+                if ( i % 10 == 0){
+                    result += "\n" + this.resolveSteps[i] + ",";
+                }
+                else{
+                    if (i == this.resolveSteps.length - 1){
+                        result += this.resolveSteps[i];
+                    }
+                    else{
+                        result += this.resolveSteps[i] + ",";
+                    }
+                }
+            }
+            
+            return result;
+        }
+        
+        this.showResolveSteps = function(){
+            alert(this.getResolveSteps());
+        }
+    }
+    
+    function playJigsaw(){
+        var game = new JigsawGame(3);
+        game.initProperty();
+        game.initResolve();
+        game.isLog = true;
+        
+        //for(var i = 0;i < 200;i ++){
+       
+        //game.initRuffle(100);
+        game.randomInit();
+        //game.testInit();
+        //game.show();
+        
+        //alert("Blank:" + game.getBlankLocation() + " First:" + game.getLocation(1));
+        
+        
+        game.resolve();
+        //}
+        
+        game.writeFile(game.getCurrentFolder(),
+          "resolve_" + (new Date()).format("yyyyMMddhhmmssS") + ".log",
+          game.logContent);
+        //game.showAutoSteps();
+        
+        //game.showResolveSteps(); 
+    }
+  </script>
+  <body>
+  <form name="frmResult" id="frmResult">
+  <INPUT TYPE="button" VALUE="Start Jigsaw" ONCLICK="playJigsaw();">
+  </form>
+  </body>
+</html>

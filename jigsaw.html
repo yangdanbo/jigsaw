@@ -1,0 +1,802 @@
+<HTML>
+<TITLE>DIY Jigsaw Puzzle</TITLE>
+<HEAD>
+<META http-equiv=Content-Type content="text/html; charset=utf-8">
+<META NAME=author CONTENT="CMMSG ITSS/Foxconn Technology Group">   
+<STYLE TYPE="text/css">body, td   { font-size: 9pt; line-height: 12pt; font-family: 宋体 }
+.dcss        { border: 4px ridge #FF00FF; background-color: #CC0099 }
+.kkopl       { background-color: #CCCCFF }
+.blockscss, .kkiu   { background-color: #CC99FF }
+.kkiu DIV    { border:1px outset #FF00FF;  }
+.button      { WIDTH: 64px;HEIGHT:28px;}
+</STYLE>
+<script type="text/javascript" src="jigsawGame.js"></script>
+<script language="javascript">
+var initPicFile = "beauty1.jpg";
+var initMusicFile = "music1.mid";
+var initRuffleLevel = 0;//300;
+var picImage;
+
+var originIndex= [];
+var picIndex = [];
+var steps = [];
+
+var ticker, sec, min, timeLapsed, gameTimer;	//时间
+
+var rows = 3;
+var cols = 3;
+var picWidth = 360;
+var picHeight = 360;
+var blockWidth = 120;
+var blockHeight = 120;
+
+var lastBlockMoveDirect = "";
+var autoPlay;
+
+var game;
+
+function picPreLoadSetting(picFile){		//图片预载设置
+    picImage = new Image(picWidth,picHeight);
+    picImage.onload = picPreLoad;
+    picImage.onerror = picLoadError;
+    picImage.src = picFile;
+}
+
+function initPicIndex(){
+    for(var i = 0; i < rows * cols; i ++){
+        picIndex[i] = i;
+    }
+}
+
+function picPreLoad(){		//图片预载完成
+    picImage.onload = null;
+    picThumb.src = picImage.src; 
+    for(var i = 0; i < rows * cols; i ++){
+        document.all["picBlock" + i].src = picImage.src;
+    }
+    
+    initPicIndex();
+}
+
+function picLoadError(){	//图片加载失败
+    alert("Picture Load Failed!\nMaybe resulted from picture file or network!");
+}
+
+function getColIndex(idx){
+    return (idx % cols);
+}
+
+function getRowIndex(idx){
+    return parseInt(idx / cols);
+}
+
+function getPicLocation(blockIdx){
+    for(var i = 0;i < picIndex.length;i ++){
+        if (picIndex[i] == blockIdx){
+            return i;
+        }
+    }
+    
+    return -1;
+}
+
+function showPicBlock(idx,row,col){ //顯示圖塊
+    //alert("index:" + idx + " row:" + row + " col:" + col);
+    var curBlock = document.all["divBlock" + idx];
+    curBlock.style.left = col * blockWidth;
+    curBlock.style.top = row * blockHeight; 
+    if (idx == cols * rows - 1){
+        curBlock.style.display = "none";
+    }
+    else{
+        curBlock.style.display = "";
+    }
+}
+
+function showAllPicBlocks(){		//全移图块
+    for(var i = 0; i< picIndex.length; i++) {
+        showPicBlock(picIndex[i] ,
+            getRowIndex(i) ,getColIndex(i));
+    }   
+}
+
+function picBlocksRestore(){		//图块复原
+    clearInterval(gameTimer);
+    
+    initPicIndex();
+      
+    divBlocks.className = "blockscss";
+    lblMessage.innerText = "Picture Restored!";
+}
+
+function getBlankLocation(){
+    for (var i = 0;i < picIndex.length;i ++){
+        if (picIndex[i] == (cols * rows - 1)){
+              return i;
+        }
+    }
+    
+    return -1;
+}
+
+function isBlankCanMoveLeft(curBlank){
+   if ((curBlank % cols) >= 1){
+      return true;
+   }
+   else{
+      return false;
+   }
+}
+
+function isBlankCanMoveRight(curBlank){
+   if ((curBlank % cols) < (cols - 1)){
+      return true;
+   }
+   else{
+      return false;
+   }
+}
+
+function isBlankCanMoveUp(curBlank){
+   if (parseInt(curBlank / cols) >= 1){
+      return true;
+   } 
+   else{
+      return false;
+   }
+}
+
+function isBlankCanMoveDown(curBlank){
+   if (parseInt(curBlank / cols) < (rows - 1)){
+      return true;
+   } 
+   else{
+      return false;
+   }
+}  
+
+function getRandomNextIndex(curIndex){
+    var moveIndex = parseInt(Math.random()* 1000) % 4;
+    var newIndex = curIndex;
+    switch(moveIndex){
+        case 0:
+          if ((isBlankCanMoveRight(curIndex)) && 
+              (lastBlockMoveDirect != "left")){
+              lastBlockMoveDirect = "right";
+              newIndex = parseInt(curIndex) + 1;
+          }
+          break;
+        case 1:
+          if ((isBlankCanMoveDown(curIndex)) && 
+              (lastBlockMoveDirect != "up")){
+              lastBlockMoveDirect = "down";
+              newIndex = parseInt(curIndex) + parseInt(cols);
+          }
+          break;
+        case 2:
+          if ((isBlankCanMoveLeft(curIndex)) && 
+              (lastBlockMoveDirect != "right")){
+              lastBlockMoveDirect = "left";
+              newIndex = curIndex - 1;
+          }
+          break;
+        case 3:
+          if((isBlankCanMoveUp(curIndex)) && 
+             (lastBlockMoveDirect != "down")){
+              lastBlockMoveDirect = "up";
+              newIndex = curIndex - cols; 
+          }
+          break;
+        default:
+          newIndex = curIndex;
+          break;
+    }
+    
+    return newIndex;
+}
+
+function rufflePicBlocks(){		//随机打乱
+    divHelp.style.display = "none";
+    divSetting.style.display = "none";
+    divWin.style.display = "none";
+    divResolve.style.display='none';
+    
+    clearInterval(gameTimer);
+  
+    //隨機打亂，自己求解
+    if (initRuffleLevel == 0){
+        
+        game = new JigsawGame(cols);
+        game.initProperty();
+        game.initResolve();
+        
+        while(game.hasResolve == false){
+            game = new JigsawGame(cols);
+            game.initProperty();
+            game.initResolve();
+        
+            game.randomInit();
+            
+            game.resolve();
+        }
+        
+        //
+        for(var i = 0;i < cols * rows;i ++){
+            picIndex[i] = game.originPicIndex[i] - 1;
+        }
+        
+        //
+        steps = [];
+        for(var i = game.resolveSteps.length - 1 ;i >= 0;i --){
+            steps.push(game.resolveSteps[i] - 1);
+        }
+        
+        //game.show();
+        
+        //game.showOrigin();
+        
+        //game.showResolveSteps();
+    }
+    //隨機交換，保證有解
+    else{
+        initPicIndex();
+   
+        steps = new Array();
+    
+        for(var i = 0; i < initRuffleLevel; i++){
+            firstIndex = getBlankLocation();
+            secondIndex = getRandomNextIndex(firstIndex);
+        
+            if ((firstIndex != secondIndex) && 
+                (secondIndex < picIndex.length)){
+              
+                intTemp = picIndex[firstIndex];
+                picIndex[firstIndex] = picIndex[secondIndex];
+                picIndex[secondIndex] = intTemp;
+              
+                steps[steps.length] = firstIndex; 
+            }
+        }
+    }
+    
+    for(var i = 0;i < picIndex.length;i ++){
+       originIndex[i] = picIndex[i];
+    }
+    
+    //show();
+    
+    divBlocks.className = "blockscss";
+    showAllPicBlocks();
+
+    ticker = 0;
+    gameTimer = setInterval('runClock()',1000);
+    
+    isRuffle = false;
+}
+
+function runClock(){
+    var min = Math.floor(ticker/60);
+    var sec = (ticker - (min * 60)) + '';
+    if(sec.length == 1){
+        sec = "0" + sec;
+    }
+        
+    ticker++;
+    timeLapsed = min + " Minutes " + sec + " Seconds";
+    lblMessage.innerText = "Time：" + timeLapsed;
+}
+
+function showLastPicBlock(){ 
+    var curBlock = document.all["divBlock" + (rows * cols -1)];
+    curBlock.style.left = (cols - 1) * blockWidth;
+    curBlock.style.top = (rows - 1) * blockHeight; 
+  
+    curBlock.style.display = "";
+}
+
+function checkWin(){
+    var isWin = true;
+    for(var i = 0; i < picIndex.length - 1; i++){
+        if(picIndex[i] != i ){
+            isWin = false;
+        }
+    }
+   
+    if(isWin){
+        clearInterval(gameTimer);
+        
+        showLastPicBlock();
+        
+        divBlocks.className = "blockscss";
+        divWin.style.display = "block";
+        lblWin.innerText = "Congratulations!You had win this game！\n" +
+                           "It cost you " + timeLapsed +"！";
+    }
+}
+
+function swapPic(curLoc,blankLoc){
+    var temp = picIndex[curLoc];
+    picIndex[curLoc] = picIndex[blankLoc];
+    picIndex[blankLoc] = temp;
+}
+
+function moveBlockToBlank(idx){
+    var blankLoc = getBlankLocation();
+    var blankRow = getRowIndex(blankLoc);
+    var blankCol = getColIndex(blankLoc);
+    
+    var curLoc = getPicLocation(idx);
+    var moveRow = getRowIndex(curLoc);   
+    var moveCol = getColIndex(curLoc);
+    
+    if((moveCol==blankCol+1 || moveCol==blankCol-1) && moveRow==blankRow || 
+       (moveRow==blankRow+1 || moveRow==blankRow-1) && moveCol==blankCol){
+      swapPic(curLoc,blankLoc);
+      
+      showPicBlock(picIndex[blankLoc], blankRow, blankCol);
+      showPicBlock(picIndex[curLoc], moveRow, moveCol);
+    
+      checkWin();
+   }
+}
+
+function moveBlockByKey(blankLoc, blankRow, blankCol, 
+    moveRow, moveCol){
+    var curLoc = moveRow * cols + moveCol;
+    var moveIdx = picIndex[curLoc];
+    if (moveIdx != -1){
+      swapPic(moveRow * cols + moveCol, blankLoc);
+      
+      showPicBlock(picIndex[blankLoc], blankRow, blankCol);
+      showPicBlock(picIndex[curLoc], moveRow, moveCol);
+  
+      checkWin();
+    }
+}
+
+function moveByKey(){		//接收按键
+    var code = event.keyCode;
+    if (code == 37||code == 39||code == 38||code == 40){
+      var blankLoc = getBlankBlockLocation();
+      blankRow = getRowIndex(blankLoc);
+      blankCol = getColIndex(blankLoc);
+    
+      switch (code){
+          case 37: //左
+            if( blankCol < cols){
+                moveBlockByKey(blankLoc, blankRow, blankCol, 
+                    blankRow, blankCol + 1);
+            }
+            break;
+          case 39: //右
+            if(blankCol > 0){
+                moveBlockByKey(blankLoc, blankRow, blankCol, 
+                    blankRow, blankCol - 1);
+            }
+            break;
+          case 38: //上
+            if(blankRow < rows){
+               moveBlockByKey(blankLoc, blankRow, blankCol, 
+                    blankRow + 1, blankCol);
+            }
+            break;
+          case 40: //下
+            if(blankRow > 0){
+                moveBlockByKey(blankLoc, blankRow, blankCol, 
+                    blankRow - 1, blankCol);
+            }
+            break;
+      }
+   }
+}
+
+function initPicBlocks(){
+    var strBlockHTML = "";
+    for(var i = 0; i < rows; i ++){
+        for(var j = 0; j < cols; j ++){
+            var idx = i * cols + j;
+            
+            strBlockHTML += '<DIV ID="divBlock' + idx + '" ' 
+                 + 'onmousedown="moveBlockToBlank(' + idx + ');" '
+                 + 'STYLE="position: absolute; top: ' +( i * blockHeight) + '; left: ' + ( j * blockWidth ) + '; width: ' + blockWidth + '; height: ' + blockHeight + ' ; overflow: hidden;">'
+                 + '<SPAN STYLE="position: absolute; left: -'+ ( j * blockWidth ) + '; top: -'+ ( i * blockHeight ) + '">'
+                 + '<IMG ID="picBlock' + idx + '" BORDER="0" WIDTH="' + picWidth + '" HEIGHT="' + picHeight + '">'
+                 + '</SPAN></DIV>';
+  
+            //document.write(strBlockHTML);
+        } 
+   }
+   
+   divBlocks.innerHTML = strBlockHTML;
+}
+
+function sysSetting(){
+    var picFileSelected,musicFileSelected,ruffleLevel;
+    if(rbPicSource[0].checked){
+        picFileSelected = cboPicList.value;
+    } 
+    else{
+        picFileSelected = picFileBrowse.value.replace(/\\/g,"/");
+    }
+        
+    if(rbMusicSource[0].checked){
+        musicFileSelected = cboMusicList.value;
+    }    
+    else{
+        musicFileSelected = musicFileBrowse.value.replace(/\\/g,"/");
+    }
+    
+    var picExt = picFileSelected.slice(
+          picFileSelected.lastIndexOf(".")).toUpperCase();
+    
+    if(picExt!=".JPE" && picExt!=".JPG"  && picExt!=".JPEG" && 
+       picExt!=".GIF" && picExt!=".BMP" && picExt!=".PNG"){
+        alert("The picture file selected can't be used in web!");
+        return;
+    }
+    
+    var musicExt = musicFileSelected.slice(
+          musicFileSelected.lastIndexOf(".")).toUpperCase();
+    if(musicExt!="" && musicExt!=".MID" && musicExt!=".MIDI" && 
+       musicExt!=".WAV" && musicExt!=".MP3"){
+        alert("The music file selected can't be used in web!");
+        return;
+    }
+    
+    if(initMusicFile != musicFileSelected){
+        initMusicFile = musicFileSelected;
+        
+        bgMusic.src = musicFileSelected;
+    }
+    
+    ruffleLevel = cboRuffleLevel.value;
+    initRuffleLevel = ruffleLevel;
+ 
+    rows = settingRows.value;
+    cols = settingCols.value;
+ 
+    if(initPicFile != picFileSelected){
+        initPicFile = picFileSelected;
+    }
+  
+    divSetting.style.display="none";
+    blockWidth = picWidth / cols;
+    blockHeight = picHeight / rows;
+    
+    initPicBlocks();
+   
+    picPreLoadSetting(picFileSelected);
+  
+    showAllPicBlocks();
+}
+
+function showSetting(){
+    divSetting.style.display='block';
+    divHelp.style.display='none';
+}
+
+function showHelp(){
+    divHelp.style.display='block';
+    divSetting.style.display='none';
+}
+
+var autoIdx = 0;
+
+function autoMoveBlock(){
+    var blankLoc = getBlankLocation();
+    var blankRow = getRowIndex(blankLoc);
+    var blankCol = getColIndex(blankLoc);
+    
+    var curLoc = steps[autoIdx];
+    //alert("index:" + autoIdx + "(" + curLoc + ")");
+    //随机初始化，解法步骤中放的是图块号
+    //交换初始化，解法步骤中放的是图块数字下标
+    if (initRuffleLevel == 0){
+        curLoc = getPicLocation(curLoc);
+    }
+    
+    //show();
+    
+    //alert("blank " + blankLoc + " -> " + curLoc);
+    
+    var moveRow = getRowIndex(curLoc);   
+    var moveCol = getColIndex(curLoc);
+    
+    var moveIdx = picIndex[curLoc];
+    if (initRuffleLevel == 0){
+        moveIdx = steps[autoIdx];
+    }
+    
+    if (moveIdx != -1){
+      swapPic(moveRow * cols + moveCol, blankLoc);
+      
+      showPicBlock(picIndex[blankLoc], blankRow, blankCol);
+      showPicBlock(picIndex[curLoc], moveRow, moveCol);
+    }
+    
+    autoIdx --;
+    
+    if (autoIdx < 0){
+        clearTimeout(autoPlay);
+        
+        showLastPicBlock();
+        
+        //show();
+        
+        divBlocks.className = "blockscss";
+        lblMessage.innerText = "Auto Play Demo Finished!";
+    }
+    else{
+        autoPlay = setTimeout('autoMoveBlock();',300);
+    }
+}
+
+function autoPlayDemo(){
+    if (steps.length <= 0){
+        alert("Please ruffle block first!");
+        return;
+    }
+    
+    clearInterval(gameTimer);
+    
+    clearTimeout(autoPlay);
+    
+    divBlocks.className = "blockscss";
+    lblMessage.innerText = "Auto Playing,Please wait...";
+    
+    //show();
+    //showOrigin();
+
+    for(var i = 0;i < picIndex.length;i ++){
+       picIndex[i] = originIndex[i];
+    }
+    //show();
+    showAllPicBlocks();
+    
+    autoIdx = steps.length - 1;
+    autoPlay = setTimeout('autoMoveBlock();',300);
+}
+
+function showResolve(){
+    if (steps.length <= 0){
+        alert("Please ruffle block first!");
+        return;
+    }
+     
+    var result = "Origin PicIndex:";
+    for (var i = 0 ;i < originIndex.length; i++){
+        if ( i % rows == 0){
+            result += "\n" + (originIndex[i] < 10 ?  
+              " " + originIndex[i] : originIndex[i]) + "\t";
+        }
+        else{
+            result += (originIndex[i] < 10 ?  
+                " " + originIndex[i] : originIndex[i]) + "\t";
+        }
+    }
+    
+    result += "\nTotal " + steps.length + " Steps:";
+    var count = 0;
+    
+    for (var j = steps.length - 1;j >= 0;j --){
+      
+      if (count % 9 == 0){
+          result += "\n" + steps[j] + ",";
+      }
+      else{
+          if (j == 0){
+              result += steps[j];
+          }
+          else{
+              result += steps[j] + ",";
+          }
+      }
+      
+      count ++;
+    }
+    
+    txtResolve.value = result;
+    divResolve.style.display='block';
+}
+
+function show(){
+    var result = "";
+    for (var i = 0 ;i < picIndex.length; i++){
+        if ( i % rows == 0){
+            result += "\n" + (picIndex[i] < 10 ?  
+              " " + picIndex[i] : picIndex[i]) + "\t";
+        }
+        else{
+            result += (picIndex[i] < 10 ?  
+                " " + picIndex[i] : picIndex[i]) + "\t";
+        }
+    }
+        
+    alert(result);
+}
+
+function showOrigin(){
+    var result = "";
+    for (var i = 0 ;i < originIndex.length; i++){
+        if ( i % rows == 0){
+            result += "\n" + (originIndex[i] < 10 ?  
+              " " + originIndex[i] : originIndex[i]) + "\t";
+        }
+        else{
+            result += (originIndex[i] < 10 ?  
+                " " + originIndex[i] : originIndex[i]) + "\t";
+        }
+    }
+        
+    alert(result);
+}
+
+</script>
+
+<!--<BGSOUND id="bgMusic" SRC="music1.mid" LOOP="-1">-->
+<audio autoplay="autoplay" loop="loop" preload="auto"            
+       src="追梦人.mp3">你的浏览器不支持audio标签</audio>  
+</HEAD>
+
+<BODY TEXT="#FFFF00" BGCOLOR="#000000" 
+      onload="picPreLoadSetting(initPicFile);" onkeyup="moveByKey();" 
+      onselectstart="return false" ondragstart="return false">
+    
+<DIV STYLE="display: none;position: absolute; top: 50; left: 10; width: 210; height: 150" 
+     ID="divResolve" class="dcss">
+  <textarea id="txtResolve" name="txtResolve" style="width='210'" 
+            rows="7">
+  </textarea>
+</DIV>
+
+<DIV STYLE="position: absolute; top: 435; left: 240; width: 380; height: 26" 
+     class="dcss">
+  <P ID="lblMessage" ALIGN="center">　</P>
+</DIV>
+
+
+<DIV STYLE="position: absolute; top: 50; left: 240; width: 380; height: 380; z-index: 1" class="kkopl">
+  <DIV ID="divBlocks" class="blockscss"
+       STYLE="position: absolute; top: 10; left: 10; width: 360; height: 360; z-index: 4">
+  </DIV>
+  <script language=javascript>
+      initPicBlocks();
+      showAllPicBlocks();
+  </script>
+  <!--<DIV STYLE="position: absolute; top: 0; left: -100; width: 100; height: 120; z-index: 2" class="kkopl">
+    <DIV STYLE="position: absolute; top: 10; left: 10; width: 100; height: 100;" class="blockscss">
+    </DIV>
+  </DIV>-->
+</DIV>
+
+<P><SPAN STYLE="position: absolute; left: 30; top: 205; z-index: 9">
+<IMG id="picThumb" BORDER="0" width="180" height="180"></SPAN>
+</P>
+<DIV STYLE="position: absolute; top: 385; left: 10; width: 210; height: 64">
+  <P ALIGN="center">
+      <INPUT TYPE="button" CLASS="button" VALUE="Restore" 
+             ONCLICK="picBlocksRestore();showAllPicBlocks()" TITLE="click here to restore picture blocks">
+      <INPUT TYPE="button" CLASS="button" VALUE="Ruffle" ONCLICK="rufflePicBlocks();"  TITLE="click here to ruffle picture blocks">
+      <INPUT TYPE="button" CLASS="button" VALUE="Demo" ONCLICK="autoPlayDemo();" TITLE="click here to demo auto play">
+  </P>
+  <P ALIGN="center">
+      <INPUT TYPE="button" CLASS="button" VALUE="Setting" ONCLICK="showSetting();" TITLE="click here to change game setting">
+      <INPUT TYPE="button" CLASS="button" VALUE="Help" ONCLICK="showHelp();" TITLE="click here to show game help">
+      <INPUT TYPE="button" CLASS="button" VALUE="Resolve" ONCLICK="showResolve();" TITLE="click here to show resolve steps">
+  </P>
+</DIV>
+
+<DIV ID="divWin" class="dcss"
+     STYLE="display: none; position: absolute; top: 155; left: 341; width: 183; height: 140; z-index: 20">
+  <P>　</P>
+  <P ID="lblWin" ALIGN="center"></P>
+  <P ALIGN="center">
+      <INPUT TYPE="button" VALUE="OK" ONCLICK="divWin.style.display='none';">
+  </P>
+</DIV>
+
+<DIV ID="divSetting" class="dcss" 
+     STYLE="display: none; position: absolute; top: 121; left: 276; width: 320; height: 240; z-index: 30">
+<TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" 
+       STYLE="border-collapse: collapse" WIDTH="100%" HEIGHT="195">
+  <TR>
+    <TD WIDTH="100%" HEIGHT="64">图片:<BR>
+        <INPUT TYPE="radio" NAME="rbPicSource" VALUE="0" CHECKED>
+        选择图片：
+        <SELECT SIZE="1" NAME="cboPicList">
+            <OPTION VALUE="beauty1.jpg" SELECTED>beauty1.jpg</OPTION>
+            <OPTION VALUE="beauty2.jpg">beauty2.jpg</OPTION>
+            <OPTION VALUE="beauty3.jpg">beauty3.jpg</OPTION>
+            <OPTION VALUE="beauty4.jpg">beauty4.jpg</OPTION>
+            <OPTION VALUE="beauty5.jpg">beauty5.jpg</OPTION>
+            <OPTION VALUE="beauty6.jpg">beauty6.jpg</OPTION>
+        </SELECT><BR>
+        <INPUT TYPE="radio" NAME="rbPicSource" VALUE="1">
+        <INPUT TYPE="file" SIZE="20" NAME="picFileBrowse">
+    </TD>
+  </TR>
+  <TR>
+    <TD WIDTH="100%" HEIGHT="63">背景音乐:<BR>
+      <INPUT TYPE="radio" NAME="rbMusicSource" VALUE="0" CHECKED>
+      选择音乐:
+      <SELECT SIZE="1" NAME="cboMusicList">
+        <OPTION>No Music</OPTION>
+        <OPTION VALUE="music1.mid" SELECTED>music1.mid</OPTION>
+        <OPTION VALUE="music2.mid">music2.mid</OPTION>
+        <OPTION VALUE="music3.mid">music3.mid</OPTION>
+        <OPTION VALUE="music4.mid">music4.mid</OPTION>
+        <OPTION VALUE="music5.mid">music5.mid</OPTION>
+        <OPTION VALUE="music6.mid">music6.mid</OPTION>
+      </SELECT><BR>
+      <INPUT TYPE="radio" NAME="rbMusicSource" VALUE="1">
+      <INPUT TYPE="file" SIZE="20" NAME="musicFileBrowse">
+    </TD>
+  </TR>
+  <TR>
+    <TD WIDTH="100%" HEIGHT="36">Picture Ruffle Level：
+      <SELECT SIZE="1" NAME="cboRuffleLevel">
+        <OPTION SELECTED VALUE="0">Random</OPTION>
+        <OPTION VALUE="100">Easy</OPTION>
+        <OPTION VALUE="300">Common</OPTION>
+        <OPTION VALUE="500">Hard</OPTION>
+        <OPTION VALUE="1000">Difficult</OPTION>
+      </SELECT>
+    </TD>
+  </TR>
+  <TR>
+    <TD WIDTH="100%" HEIGHT="36">
+         Rows:<SELECT SIZE="1" NAME="settingRows">
+            <OPTION VALUE="3" SELECTED>3</OPTION>
+            <OPTION VALUE="4">4</OPTION>
+            <OPTION VALUE="5">5</OPTION>
+            <OPTION VALUE="6">6</OPTION>
+          </SELECT>
+          Cols:<SELECT SIZE="1" NAME="settingCols">
+            <OPTION VALUE="3" SELECTED>3</OPTION>
+            <OPTION VALUE="4">4</OPTION>
+            <OPTION VALUE="5">5</OPTION>
+            <OPTION VALUE="6">6</OPTION>
+          </SELECT>
+    </TD>
+  </TR>
+  <TR>
+    <TD WIDTH="100%" HEIGHT="29" ALIGN="center">
+        <INPUT TYPE="button"  CLASS="button" VALUE="OK" ONCLICK="sysSetting()"> 
+        <INPUT TYPE="button"  CLASS="button" VALUE="Cancel" 
+               ONCLICK="divSetting.style.display='none'">
+    </TD>
+  </TR>
+</TABLE>
+</DIV>
+
+<DIV STYLE="display: none; position: absolute; top: 50; left: 314; width: 227; height: 282; z-index: 30" 
+     class="dcss" ID="divHelp">
+    <P ALIGN="center">Play Gudie</P>
+    <P><SPAN LANG="zh-cn">操作方式</SPAN>:
+       <SPAN LANG="zh-cn"><BR>
+       鼠标点击图块或上下左右方向键。<BR>系统设置</SPAN>:
+       <SPAN LANG="zh-cn"><BR>
+       1、自选图片的格式必需是</SPAN>.bmp
+       <SPAN LANG="zh-cn">、<BR></SPAN>.jpg
+       <SPAN LANG="zh-cn">、</SPAN>.gif
+       <SPAN LANG="zh-cn">或</SPAN>.png
+       <SPAN LANG="zh-cn">的文件，大小最好<BR>为500*400。<BR>
+       2、自选音乐的格式必需的</SPAN>.mid
+       <SPAN LANG="zh-cn">、<BR></SPAN>.mp3
+       <SPAN LANG="zh-cn">或</SPAN>.wav
+       <SPAN LANG="zh-cn">的文件。</SPAN>
+   </P>
+   <P><SPAN LANG="zh-cn">制作</SPAN>:
+      <SPAN LANG="zh-cn">海浪</SPAN><BR>
+      E-Mail:<A HREF="mailto:xuhotao@163.com">xuhotao@163.com</A><BR>
+      <SPAN LANG="zh-cn">修改</SPAN>:<SPAN LANG="zh-cn">Dumbbell Yang</SPAN><BR>
+      E-Mail:<A HREF="mailto:yangdanbo@163.com">yangdanbo@163.com</A><BR>
+   </P>
+   <P ALIGN="center">
+     <INPUT TYPE="button" CLASS="button" VALUE="OK"  
+            ONCLICK="divHelp.style.display='none'">
+</DIV>
+
+</BODY>
+
+</HTML>
